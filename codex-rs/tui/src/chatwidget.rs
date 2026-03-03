@@ -557,7 +557,7 @@ pub(crate) struct ChatWidget {
     /// Stored collaboration mode with model and reasoning effort.
     ///
     /// Masks are applied on top of this base mode to derive the effective mode.
-    stored_collaboration_mode: CollaborationMode,
+    current_collaboration_mode: CollaborationMode,
     /// The currently active collaboration mask, if any.
     active_collaboration_mask: Option<CollaborationModeMask>,
     /// Base model and effort used to seed collaboration mode presets.
@@ -1221,7 +1221,7 @@ impl ChatWidget {
         let model_for_header = event.model.clone();
         self.session_header.set_model(&model_for_header);
         if !self.collaboration_modes_enabled() {
-            self.stored_collaboration_mode = self.stored_collaboration_mode.with_updates(
+            self.current_collaboration_mode = self.current_collaboration_mode.with_updates(
                 Some(model_for_header.clone()),
                 Some(event.reasoning_effort),
                 None,
@@ -1628,7 +1628,7 @@ impl ChatWidget {
     }
 
     fn open_plan_implementation_prompt(&mut self) {
-        let default_mask = collaboration_modes::default_mode_mask(
+        let default_mask = collaboration_modes::default_mode_mask_with_overrides(
             &self.base_model,
             self.base_reasoning_effort,
             self.config.collaboration_modes.as_ref(),
@@ -3081,7 +3081,7 @@ impl ChatWidget {
             developer_instructions: None,
         };
         // Collaboration modes start in Default mode.
-        let stored_collaboration_mode = CollaborationMode {
+        let current_collaboration_mode = CollaborationMode {
             mode: ModeKind::Default,
             settings: fallback_default,
         };
@@ -3116,7 +3116,7 @@ impl ChatWidget {
             config,
             skills_all: Vec::new(),
             skills_initial_state: None,
-            stored_collaboration_mode,
+            current_collaboration_mode,
             active_collaboration_mask,
             base_model,
             base_reasoning_effort,
@@ -3270,7 +3270,7 @@ impl ChatWidget {
             developer_instructions: None,
         };
         // Collaboration modes start in Default mode.
-        let stored_collaboration_mode = CollaborationMode {
+        let current_collaboration_mode = CollaborationMode {
             mode: ModeKind::Default,
             settings: fallback_default,
         };
@@ -3305,7 +3305,7 @@ impl ChatWidget {
             config,
             skills_all: Vec::new(),
             skills_initial_state: None,
-            stored_collaboration_mode,
+            current_collaboration_mode,
             active_collaboration_mask,
             base_model,
             base_reasoning_effort,
@@ -3457,7 +3457,7 @@ impl ChatWidget {
             developer_instructions: None,
         };
         // Collaboration modes start in Default mode.
-        let stored_collaboration_mode = CollaborationMode {
+        let current_collaboration_mode = CollaborationMode {
             mode: ModeKind::Default,
             settings: fallback_default,
         };
@@ -3485,7 +3485,7 @@ impl ChatWidget {
             config,
             skills_all: Vec::new(),
             skills_initial_state: None,
-            stored_collaboration_mode,
+            current_collaboration_mode,
             active_collaboration_mask,
             base_model,
             base_reasoning_effort,
@@ -3917,7 +3917,7 @@ impl ChatWidget {
                     );
                     return;
                 }
-                if let Some(mask) = collaboration_modes::plan_mask(
+                if let Some(mask) = collaboration_modes::plan_mask_with_overrides(
                     &self.base_model,
                     self.base_reasoning_effort,
                     self.config.collaboration_modes.as_ref(),
@@ -6124,7 +6124,7 @@ impl ChatWidget {
     }
 
     pub(crate) fn open_collaboration_modes_popup(&mut self) {
-        let presets = collaboration_modes::presets_for_tui(
+        let presets = collaboration_modes::presets_for_tui_with_overrides(
             &self.base_model,
             self.base_reasoning_effort,
             self.config.collaboration_modes.as_ref(),
@@ -6142,7 +6142,7 @@ impl ChatWidget {
             .as_ref()
             .and_then(|mask| mask.mode)
             .or_else(|| {
-                collaboration_modes::default_mask(
+                collaboration_modes::default_mask_with_overrides(
                     &self.base_model,
                     self.base_reasoning_effort,
                     self.config.collaboration_modes.as_ref(),
@@ -6241,7 +6241,7 @@ impl ChatWidget {
                     "user-chosen Plan override ({})",
                     Self::reasoning_effort_label(plan_override).to_lowercase()
                 )
-            } else if let Some(plan_mask) = collaboration_modes::plan_mask(
+            } else if let Some(plan_mask) = collaboration_modes::plan_mask_with_overrides(
                 &self.base_model,
                 self.base_reasoning_effort,
                 self.config.collaboration_modes.as_ref(),
@@ -7225,13 +7225,13 @@ impl ChatWidget {
         }
         if feature == Feature::CollaborationModes {
             self.bottom_pane.set_collaboration_modes_enabled(enabled);
-            let settings = self.stored_collaboration_mode.settings.clone();
-            self.stored_collaboration_mode = CollaborationMode {
+            let settings = self.current_collaboration_mode.settings.clone();
+            self.current_collaboration_mode = CollaborationMode {
                 mode: ModeKind::Default,
                 settings,
             };
             self.active_collaboration_mask = if enabled {
-                collaboration_modes::default_mask(
+                collaboration_modes::default_mask_with_overrides(
                     &self.base_model,
                     self.base_reasoning_effort,
                     self.config.collaboration_modes.as_ref(),
@@ -7298,7 +7298,7 @@ impl ChatWidget {
         {
             if let Some(effort) = effort {
                 mask.reasoning_effort = Some(Some(effort));
-            } else if let Some(plan_mask) = collaboration_modes::plan_mask(
+            } else if let Some(plan_mask) = collaboration_modes::plan_mask_with_overrides(
                 &self.base_model,
                 self.base_reasoning_effort,
                 self.config.collaboration_modes.as_ref(),
@@ -7310,8 +7310,8 @@ impl ChatWidget {
 
     /// Set the reasoning effort in the stored collaboration mode.
     pub(crate) fn set_reasoning_effort(&mut self, effort: Option<ReasoningEffortConfig>) {
-        self.stored_collaboration_mode =
-            self.stored_collaboration_mode
+        self.current_collaboration_mode =
+            self.current_collaboration_mode
                 .with_updates(None, Some(effort), None);
         if self.collaboration_modes_enabled()
             && let Some(mask) = self.active_collaboration_mask.as_mut()
@@ -7368,8 +7368,8 @@ impl ChatWidget {
 
     /// Set the model in the widget's config copy and stored collaboration mode.
     pub(crate) fn set_model(&mut self, model: &str) {
-        self.stored_collaboration_mode =
-            self.stored_collaboration_mode
+        self.current_collaboration_mode =
+            self.current_collaboration_mode
                 .with_updates(Some(model.to_string()), None, None);
         if self.collaboration_modes_enabled()
             && let Some(mask) = self.active_collaboration_mask.as_mut()
@@ -7414,12 +7414,12 @@ impl ChatWidget {
 
     pub(crate) fn current_model(&self) -> &str {
         if !self.collaboration_modes_enabled() {
-            return self.stored_collaboration_mode.model();
+            return self.current_collaboration_mode.model();
         }
         self.active_collaboration_mask
             .as_ref()
             .and_then(|mask| mask.model.as_deref())
-            .unwrap_or_else(|| self.stored_collaboration_mode.model())
+            .unwrap_or_else(|| self.current_collaboration_mode.model())
     }
 
     pub(crate) fn realtime_conversation_is_live(&self) -> bool {
@@ -7494,7 +7494,7 @@ impl ChatWidget {
 
     #[allow(dead_code)] // Used in tests
     pub(crate) fn current_collaboration_mode(&self) -> &CollaborationMode {
-        &self.stored_collaboration_mode
+        &self.current_collaboration_mode
     }
 
     pub(crate) fn current_reasoning_effort(&self) -> Option<ReasoningEffortConfig> {
@@ -7523,7 +7523,7 @@ impl ChatWidget {
         if !config.features.enabled(Feature::CollaborationModes) {
             return None;
         }
-        let mut mask = collaboration_modes::default_mask(
+        let mut mask = collaboration_modes::default_mask_with_overrides(
             base_model,
             base_effort,
             config.collaboration_modes.as_ref(),
@@ -7543,9 +7543,9 @@ impl ChatWidget {
 
     fn effective_reasoning_effort(&self) -> Option<ReasoningEffortConfig> {
         if !self.collaboration_modes_enabled() {
-            return self.stored_collaboration_mode.reasoning_effort();
+            return self.current_collaboration_mode.reasoning_effort();
         }
-        let current_effort = self.stored_collaboration_mode.reasoning_effort();
+        let current_effort = self.current_collaboration_mode.reasoning_effort();
         self.active_collaboration_mask
             .as_ref()
             .and_then(|mask| mask.reasoning_effort)
@@ -7554,11 +7554,11 @@ impl ChatWidget {
 
     fn effective_collaboration_mode(&self) -> CollaborationMode {
         if !self.collaboration_modes_enabled() {
-            return self.stored_collaboration_mode.clone();
+            return self.current_collaboration_mode.clone();
         }
         self.active_collaboration_mask.as_ref().map_or_else(
-            || self.stored_collaboration_mode.clone(),
-            |mask| self.stored_collaboration_mode.apply_mask(mask),
+            || self.current_collaboration_mode.clone(),
+            |mask| self.current_collaboration_mode.apply_mask(mask),
         )
     }
 
@@ -7626,7 +7626,7 @@ impl ChatWidget {
             return;
         }
 
-        if let Some(next_mask) = collaboration_modes::next_mask(
+        if let Some(next_mask) = collaboration_modes::next_mask_with_overrides(
             &self.base_model,
             self.base_reasoning_effort,
             self.config.collaboration_modes.as_ref(),

@@ -24,3 +24,10 @@ This file captures the full set of changes currently in the working tree.
 - Collaboration mode presets now derive defaults from `/model` + reasoning effort and apply the optional overrides.
 - The app-server collaboration-mode list uses these overrides and the resolved base model so UI and API stay aligned.
 - Built-in Plan preset keeps `medium` reasoning effort by default, while allowing per-mode override via config.
+
+## AGENTS.md reload semantics
+
+- On each new user turn, Codex now checks whether project docs (`AGENTS.md` hierarchy) changed.
+- If changed, it reloads instructions before creating the turn, so updates made during a running turn take effect on the next turn.
+- When a reload happens, Codex emits an explicit warning in the transcript:
+  `AGENTS.md instructions changed. Reloaded and applied starting this turn.`

@@ -139,6 +139,15 @@ git diff TAG..NEW_BRANCH
 
 更多对照方式（worktree、merge-base 对照等）见 `references/advanced.md`。
 
+### 8) Final release build (codex-rs)
+
+所有重实现修改完成并确认后，再执行最后收尾构建：
+
+```bash
+cd codex-rs
+cargo build -p codex-cli --release
+```
+
 ## How changes are computed from OLD_BRANCH
 
 默认用以下方式推断旧分支的“改动基线”：

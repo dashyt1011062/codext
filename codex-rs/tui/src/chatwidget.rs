@@ -1700,6 +1700,9 @@ impl ChatWidget {
             self.rate_limit_snapshots_by_limit_id.clear();
         }
         self.refresh_status_line();
+        // Rate-limit polling happens off the main turn stream, so request a frame explicitly
+        // to keep header/status surfaces in sync while the UI is otherwise idle.
+        self.request_redraw();
     }
 
     pub(crate) fn on_git_status_update(&mut self, summary: Option<GitStatusSummary>) {

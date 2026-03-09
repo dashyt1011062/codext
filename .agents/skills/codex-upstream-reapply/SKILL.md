@@ -9,6 +9,8 @@ description: "Tag-based upstream sync for a fork/secondary-development repo: fet
 
 用于“二开/魔改”场景的 tag 同步：先 `git fetch upstream --tags` 拉取 tags，让用户选择一个 tag 版本，从该 tag 创建新分支作为开发起点；然后读取旧二开分支的 git changes 与意图 Markdown，在新分支上“重实现”需求（不 merge/rebase 旧分支历史）。
 
+核心原则：`OLD_BRANCH` 的代码与提交历史只是参考材料，不是要直接照搬到 `NEW_BRANCH`。每次新的 upstream tag 都可能已经重构了相关模块，所以应当以 `CHANGED.md`、意图文档和旧分支行为为需求来源，基于当前 `TAG` 对应的代码结构重新实现。
+
 ## Inputs (每次明确这些东西)
 
 - `REMOTE`：拉取 tags 的 remote（默认 `upstream`）
@@ -67,7 +69,7 @@ bash .agents/skills/codex-upstream-reapply/scripts/start_from_tag.sh \
 - 变更文件清单、diff patch、commit 列表
 -（默认）复制所有“变更过的 Markdown 意图文档”的旧版内容到 bundle 里
 -（可选）用 `--copy-all` 复制所有变更文件的旧版内容（用于离线阅读）
-并且会把 `OLD_BRANCH` 的 `README.md`、`CHANGED.md`、`scripts/`、`.github/workflows/ci.yml` 与 `.agents/skills/` 原样复制到 `NEW_BRANCH`（不改内容；如有差异会自动提交一次）。
+并且会把 `OLD_BRANCH` 的 `README.md`、`CHANGED.md` 与 `.agents/skills/` 原样复制到 `NEW_BRANCH`（不改内容；如有差异会自动提交一次）。
 
 如果基线推断可疑（脚本会提示），请显式指定旧分支基线 tag：
 
@@ -80,6 +82,13 @@ bash .agents/skills/codex-upstream-reapply/scripts/start_from_tag.sh \
 ### 4) Read OLD_BRANCH as reference (理解需求与意图，而不是直接套 patch)
 
 从 bundle 里先读清楚“要实现什么”，再开始在 `NEW_BRANCH` 上写代码。
+
+重点：
+
+- `OLD_BRANCH` 的实现、diff、提交记录只用于帮助理解需求，不应直接 `cherry-pick`、照搬旧提交历史，或把旧分支当成目标代码树覆盖到新分支上。
+- `CHANGED.md` 应视为需求清单的第一参考来源；旧分支代码只是帮助你理解这些需求当时是如何落地的。
+- 若 upstream 在新 `TAG` 中已经重构相关模块，应优先适配当前 codebase 的结构，在当前实现方式下重新落地相同需求，而不是强行维持旧文件组织或旧接口。
+- 最终目标是“在当前 codebase 上实现同样的需求”，不是“让新分支长得像旧分支的提交历史”。
 
 常用命令（在 `NEW_BRANCH` 上也能直接读取旧分支文件）：
 
@@ -97,6 +106,7 @@ git diff BASE_COMMIT..OLD_BRANCH -- path/to/file
 ### 5) Re-implement on NEW_BRANCH
 
 - 按“需求点/模块”拆分小 commit 逐步实现。
+- 以 `CHANGED.md` 中记录的变动为主线逐项核对，确认每项需求都在当前 codebase 上重新实现。
 - 让意图文档与实现保持一致（必要时更新 Markdown）。
 - 不跑测试；不要生成或更新任何测试文件/快照文件。
 

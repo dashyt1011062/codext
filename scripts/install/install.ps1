@@ -41,7 +41,7 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
 }
 
 $resolvedVersion = Normalize-Version -RawVersion $Version
-$packageSpec = "@loongphy/codex"
+$packageSpec = "@loongphy/codext"
 if ($resolvedVersion -ne "latest") {
     $packageSpec = "$packageSpec@$resolvedVersion"
 }

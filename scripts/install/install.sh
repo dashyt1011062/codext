@@ -3,7 +3,7 @@
 set -eu
 
 VERSION="${1:-latest}"
-PACKAGE="@loongphy/codex"
+PACKAGE="@loongphy/codext"
 
 step() {
   printf '==> %s\n' "$1"

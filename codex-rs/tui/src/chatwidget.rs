@@ -8725,7 +8725,7 @@ fn rate_limit_summary(snapshot: Option<&RateLimitSnapshotDisplay>) -> Option<Str
         if let Some(resets_at) = primary.resets_at.as_ref()
             && !resets_at.trim().is_empty()
         {
-            summary = format!("{summary} @ {resets_at}");
+            summary = format!("{summary} {resets_at}");
         }
         summary
     })

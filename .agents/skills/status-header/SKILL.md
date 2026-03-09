@@ -1,11 +1,11 @@
 ---
-name: status-header-colors
-description: Enforce the standard status header bar color scheme when implementing or editing the TUI status header (ratatui Line/Span), including model, directory, git status, and rate limit segments. Use whenever adding/updating a status header bar or related formatting.
+name: status-header
+description: Enforce the standard TUI status header layout, icons, colors, and rate-limit summary format when implementing or editing the status header (ratatui Line/Span). Use whenever adding/updating the status header or related formatting.
 ---
 
-# Status Header Colors
+# Status Header
 
-Apply this color scheme every time the status header bar is implemented or modified. Use Stylize helpers and keep the segment order/formatting consistent.
+Apply these conventions every time the status header bar is implemented or modified. Use Stylize helpers and keep the segment order/formatting consistent.
 
 ## Required color mapping
 
@@ -18,6 +18,7 @@ Apply this color scheme every time the status header bar is implemented or modif
   - changed count in yellow
   - untracked count in red
 - Rate limit segment: icon + summary in cyan.
+  - Summary format: `95% 23:19`
 - Segment separator: " │ " in dim.
 
 ## Reference snippet (apply as-is)

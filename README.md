@@ -9,6 +9,20 @@ https://github.com/user-attachments/assets/127abbc2-cb30-4d6e-8a81-ce707260c045)
 
 ## Quick Start
 
+Install globally with npm first. The initial install usually takes a while:
+
+```shell
+npm install -g @longphy/codext
+```
+
+Then run:
+
+```shell
+codext
+```
+
+Or build from source by yourself:
+
 ```shell
 cd codex-rs
 cargo run --bin codex

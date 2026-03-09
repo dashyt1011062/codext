@@ -2,7 +2,7 @@
 // Unified entry point for the Codex CLI.
 
 import { spawn } from "node:child_process";
-import { existsSync } from "fs";
+import { chmodSync, existsSync, statSync } from "fs";
 import { createRequire } from "node:module";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -114,6 +114,19 @@ if (!vendorRoot) {
 const archRoot = path.join(vendorRoot, targetTriple);
 const binaryPath = path.join(archRoot, "codex", codexBinaryName);
 
+function ensureExecutable(filePath) {
+  if (process.platform === "win32" || !existsSync(filePath)) {
+    return;
+  }
+
+  const currentMode = statSync(filePath).mode;
+  if ((currentMode & 0o111) !== 0) {
+    return;
+  }
+
+  chmodSync(filePath, currentMode | 0o111);
+}
+
 // Use an asynchronous spawn instead of spawnSync so that Node is able to
 // respond to signals (e.g. Ctrl-C / SIGINT) while the native binary is
 // executing. This allows us to forward those signals to the child process
@@ -168,6 +181,8 @@ const packageManagerEnvVar =
     ? "CODEX_MANAGED_BY_BUN"
     : "CODEX_MANAGED_BY_NPM";
 env[packageManagerEnvVar] = "1";
+
+ensureExecutable(binaryPath);
 
 const child = spawn(binaryPath, process.argv.slice(2), {
   stdio: "inherit",

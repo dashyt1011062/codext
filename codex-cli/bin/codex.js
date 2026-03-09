@@ -92,8 +92,8 @@ try {
     const packageManager = detectPackageManager();
     const updateCommand =
       packageManager === "bun"
-        ? "bun install -g @loongphy/codex@latest"
-        : "npm install -g @loongphy/codex@latest";
+        ? "bun install -g @loongphy/codext@latest"
+        : "npm install -g @loongphy/codext@latest";
     throw new Error(
       `Missing optional dependency ${platformPackage}. Reinstall Codex: ${updateCommand}`,
     );
@@ -104,8 +104,8 @@ if (!vendorRoot) {
   const packageManager = detectPackageManager();
   const updateCommand =
     packageManager === "bun"
-      ? "bun install -g @loongphy/codex@latest"
-      : "npm install -g @loongphy/codex@latest";
+      ? "bun install -g @loongphy/codext@latest"
+      : "npm install -g @loongphy/codext@latest";
   throw new Error(
     `Missing optional dependency ${platformPackage}. Reinstall Codex: ${updateCommand}`,
   );

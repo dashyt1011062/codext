@@ -32,6 +32,7 @@ pub(crate) struct SessionState {
     pub(crate) startup_regular_task: Option<JoinHandle<CodexResult<RegularTask>>>,
     pub(crate) active_mcp_tool_selection: Option<Vec<String>>,
     pub(crate) active_connector_selection: HashSet<String>,
+    project_docs_snapshot: Option<String>,
 }
 
 impl SessionState {
@@ -49,6 +50,7 @@ impl SessionState {
             startup_regular_task: None,
             active_mcp_tool_selection: None,
             active_connector_selection: HashSet::new(),
+            project_docs_snapshot: None,
         }
     }
 
@@ -235,6 +237,14 @@ impl SessionState {
     // Removes all currently tracked connector selections.
     pub(crate) fn clear_connector_selection(&mut self) {
         self.active_connector_selection.clear();
+    }
+
+    pub(crate) fn project_docs_snapshot(&self) -> Option<String> {
+        self.project_docs_snapshot.clone()
+    }
+
+    pub(crate) fn set_project_docs_snapshot(&mut self, snapshot: Option<String>) {
+        self.project_docs_snapshot = snapshot;
     }
 }
 

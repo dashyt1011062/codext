@@ -163,6 +163,7 @@ use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
+use ratatui::text::Span;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Wrap;
 use tokio::sync::mpsc::UnboundedSender;
@@ -247,6 +248,8 @@ use crate::exec_cell::ExecCell;
 use crate::exec_cell::new_active_exec_command;
 use crate::exec_command::strip_bash_lc_and_escape;
 use crate::get_git_diff::get_git_diff;
+use crate::git_status::GitStatusSummary;
+use crate::git_status::collect_git_status_summary;
 use crate::history_cell;
 use crate::history_cell::AgentMessageCell;
 use crate::history_cell::HistoryCell;
@@ -380,6 +383,7 @@ fn is_standard_tool_call(parsed_cmd: &[ParsedCommand]) -> bool {
 const RATE_LIMIT_WARNING_THRESHOLDS: [f64; 3] = [75.0, 90.0, 95.0];
 const NUDGE_MODEL_SLUG: &str = "gpt-5.1-codex-mini";
 const RATE_LIMIT_SWITCH_PROMPT_THRESHOLD: f64 = 90.0;
+const RATE_LIMIT_POLL_INTERVAL_SECS: u64 = 15;
 
 #[derive(Default)]
 struct RateLimitWarningState {
@@ -664,6 +668,8 @@ pub(crate) struct ChatWidget {
     rate_limit_warnings: RateLimitWarningState,
     rate_limit_switch_prompt: RateLimitSwitchPromptState,
     rate_limit_poller: Option<JoinHandle<()>>,
+    git_status: Option<GitStatusSummary>,
+    git_status_poller: Option<JoinHandle<()>>,
     adaptive_chunking: AdaptiveChunkingPolicy,
     // Stream lifecycle controller
     stream_controller: Option<StreamController>,
@@ -1364,6 +1370,7 @@ impl ChatWidget {
         self.current_rollout_path = event.rollout_path.clone();
         self.current_cwd = Some(event.cwd.clone());
         self.config.cwd = event.cwd.clone();
+        self.start_git_status_poller();
         if let Err(err) = self
             .config
             .permissions
@@ -1816,7 +1823,12 @@ impl ChatWidget {
     }
 
     fn open_plan_implementation_prompt(&mut self) {
-        let default_mask = collaboration_modes::default_mode_mask(self.models_manager.as_ref());
+        let collaboration_mode_overrides = self.config.collaboration_mode_overrides();
+        let default_mask = collaboration_modes::default_mode_mask_with_overrides(
+            self.current_collaboration_mode.model(),
+            self.current_collaboration_mode.reasoning_effort(),
+            collaboration_mode_overrides.as_ref(),
+        );
         let (implement_actions, implement_disabled_reason) = match default_mask {
             Some(mask) => {
                 let user_text = PLAN_IMPLEMENTATION_CODING_MESSAGE.to_string();
@@ -2049,7 +2061,27 @@ impl ChatWidget {
             self.rate_limit_snapshots_by_limit_id.clear();
         }
         self.refresh_status_line();
+        // Rate-limit polling happens off the main turn stream, so request a frame explicitly
+        // to keep header/status surfaces in sync while the UI is otherwise idle.
+        self.request_redraw();
     }
+
+    pub(crate) fn handle_auth_identity_changed(&mut self) {
+        self.plan_type = None;
+        self.rate_limit_warnings = RateLimitWarningState::default();
+        self.rate_limit_switch_prompt = RateLimitSwitchPromptState::default();
+        self.prefetch_rate_limits();
+        self.request_redraw();
+    }
+
+    pub(crate) fn on_git_status_update(&mut self, summary: Option<GitStatusSummary>) {
+        if self.git_status == summary {
+            return;
+        }
+        self.git_status = summary;
+        self.request_redraw();
+    }
+
     /// Finalize any active exec as failed and stop/clear agent-turn UI state.
     ///
     /// This does not clear MCP startup tracking, because MCP startup can overlap with turn cleanup
@@ -3593,6 +3625,8 @@ impl ChatWidget {
             rate_limit_warnings: RateLimitWarningState::default(),
             rate_limit_switch_prompt: RateLimitSwitchPromptState::default(),
             rate_limit_poller: None,
+            git_status: None,
+            git_status_poller: None,
             adaptive_chunking: AdaptiveChunkingPolicy::default(),
             stream_controller: None,
             plan_stream_controller: None,
@@ -3659,6 +3693,7 @@ impl ChatWidget {
         };
 
         widget.prefetch_rate_limits();
+        widget.start_git_status_poller();
         widget.bottom_pane.set_voice_transcription_enabled(
             widget.config.features.enabled(Feature::VoiceTranscription),
         );
@@ -3781,6 +3816,8 @@ impl ChatWidget {
             rate_limit_warnings: RateLimitWarningState::default(),
             rate_limit_switch_prompt: RateLimitSwitchPromptState::default(),
             rate_limit_poller: None,
+            git_status: None,
+            git_status_poller: None,
             adaptive_chunking: AdaptiveChunkingPolicy::default(),
             stream_controller: None,
             plan_stream_controller: None,
@@ -3847,6 +3884,7 @@ impl ChatWidget {
         };
 
         widget.prefetch_rate_limits();
+        widget.start_git_status_poller();
         widget.bottom_pane.set_voice_transcription_enabled(
             widget.config.features.enabled(Feature::VoiceTranscription),
         );
@@ -3961,6 +3999,8 @@ impl ChatWidget {
             rate_limit_warnings: RateLimitWarningState::default(),
             rate_limit_switch_prompt: RateLimitSwitchPromptState::default(),
             rate_limit_poller: None,
+            git_status: None,
+            git_status_poller: None,
             adaptive_chunking: AdaptiveChunkingPolicy::default(),
             stream_controller: None,
             plan_stream_controller: None,
@@ -4027,6 +4067,7 @@ impl ChatWidget {
         };
 
         widget.prefetch_rate_limits();
+        widget.start_git_status_poller();
         widget.bottom_pane.set_voice_transcription_enabled(
             widget.config.features.enabled(Feature::VoiceTranscription),
         );
@@ -4398,7 +4439,12 @@ impl ChatWidget {
                     );
                     return;
                 }
-                if let Some(mask) = collaboration_modes::plan_mask(self.models_manager.as_ref()) {
+                let collaboration_mode_overrides = self.config.collaboration_mode_overrides();
+                if let Some(mask) = collaboration_modes::plan_mask_with_overrides(
+                    self.current_collaboration_mode.model(),
+                    self.current_collaboration_mode.reasoning_effort(),
+                    collaboration_mode_overrides.as_ref(),
+                ) {
                     self.set_collaboration_mask(mask);
                 } else {
                     self.add_info_message(
@@ -6015,6 +6061,12 @@ impl ChatWidget {
         }
     }
 
+    fn stop_git_status_poller(&mut self) {
+        if let Some(handle) = self.git_status_poller.take() {
+            handle.abort();
+        }
+    }
+
     pub(crate) fn refresh_connectors(&mut self, force_refetch: bool) {
         self.prefetch_connectors_with_options(force_refetch);
     }
@@ -6107,7 +6159,8 @@ impl ChatWidget {
         let auth_manager = Arc::clone(&self.auth_manager);
 
         let handle = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(60));
+            let mut interval =
+                tokio::time::interval(Duration::from_secs(RATE_LIMIT_POLL_INTERVAL_SECS));
 
             loop {
                 if let Some(auth) = auth_manager.auth().await
@@ -6122,6 +6175,25 @@ impl ChatWidget {
         });
 
         self.rate_limit_poller = Some(handle);
+    }
+
+    fn start_git_status_poller(&mut self) {
+        self.stop_git_status_poller();
+
+        let cwd = self.config.cwd.clone();
+        let app_event_tx = self.app_event_tx.clone();
+
+        let handle = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(5));
+
+            loop {
+                interval.tick().await;
+                let summary = collect_git_status_summary(&cwd).await;
+                app_event_tx.send(AppEvent::GitStatusFetched(summary));
+            }
+        });
+
+        self.git_status_poller = Some(handle);
     }
 
     fn should_prefetch_rate_limits(&self) -> bool {
@@ -6675,7 +6747,12 @@ impl ChatWidget {
     }
 
     pub(crate) fn open_collaboration_modes_popup(&mut self) {
-        let presets = collaboration_modes::presets_for_tui(self.models_manager.as_ref());
+        let collaboration_mode_overrides = self.config.collaboration_mode_overrides();
+        let presets = collaboration_modes::presets_for_tui_with_overrides(
+            self.current_collaboration_mode.model(),
+            self.current_collaboration_mode.reasoning_effort(),
+            collaboration_mode_overrides.as_ref(),
+        );
         if presets.is_empty() {
             self.add_info_message(
                 "No collaboration modes are available right now.".to_string(),
@@ -6689,8 +6766,12 @@ impl ChatWidget {
             .as_ref()
             .and_then(|mask| mask.mode)
             .or_else(|| {
-                collaboration_modes::default_mask(self.models_manager.as_ref())
-                    .and_then(|mask| mask.mode)
+                collaboration_modes::default_mask_with_overrides(
+                    self.current_collaboration_mode.model(),
+                    self.current_collaboration_mode.reasoning_effort(),
+                    collaboration_mode_overrides.as_ref(),
+                )
+                .and_then(|mask| mask.mode)
             });
         let items: Vec<SelectionItem> = presets
             .into_iter()
@@ -6778,25 +6859,28 @@ impl ChatWidget {
             None => "the selected reasoning".to_string(),
         };
         let plan_only_description = format!("Always use {reasoning_phrase} in Plan mode.");
-        let plan_reasoning_source = if let Some(plan_override) =
-            self.config.plan_mode_reasoning_effort
-        {
-            format!(
-                "user-chosen Plan override ({})",
-                Self::reasoning_effort_label(plan_override).to_lowercase()
-            )
-        } else if let Some(plan_mask) = collaboration_modes::plan_mask(self.models_manager.as_ref())
-        {
-            match plan_mask.reasoning_effort.flatten() {
-                Some(plan_effort) => format!(
-                    "built-in Plan default ({})",
-                    Self::reasoning_effort_label(plan_effort).to_lowercase()
-                ),
-                None => "built-in Plan default (no reasoning)".to_string(),
-            }
-        } else {
-            "built-in Plan default".to_string()
-        };
+        let collaboration_mode_overrides = self.config.collaboration_mode_overrides();
+        let plan_reasoning_source =
+            if let Some(plan_override) = self.config.plan_mode_reasoning_effort {
+                format!(
+                    "user-chosen Plan override ({})",
+                    Self::reasoning_effort_label(plan_override).to_lowercase()
+                )
+            } else if let Some(plan_mask) = collaboration_modes::plan_mask_with_overrides(
+                self.current_collaboration_mode.model(),
+                self.current_collaboration_mode.reasoning_effort(),
+                collaboration_mode_overrides.as_ref(),
+            ) {
+                match plan_mask.reasoning_effort.flatten() {
+                    Some(plan_effort) => format!(
+                        "built-in Plan default ({})",
+                        Self::reasoning_effort_label(plan_effort).to_lowercase()
+                    ),
+                    None => "built-in Plan default (no reasoning)".to_string(),
+                }
+            } else {
+                "built-in Plan default".to_string()
+            };
         let all_modes_description = format!(
             "Set the global default reasoning level and the Plan mode override. This replaces the current {plan_reasoning_source}."
         );
@@ -7870,6 +7954,22 @@ impl ChatWidget {
         if feature == Feature::FastMode {
             self.sync_fast_command_enabled();
         }
+        if feature == Feature::CollaborationModes {
+            let collaboration_mode_overrides = self.config.collaboration_mode_overrides();
+            self.bottom_pane.set_collaboration_modes_enabled(enabled);
+            self.active_collaboration_mask = if enabled {
+                collaboration_modes::default_mask_with_overrides(
+                    self.current_collaboration_mode.model(),
+                    self.current_collaboration_mode.reasoning_effort(),
+                    collaboration_mode_overrides.as_ref(),
+                )
+            } else {
+                None
+            };
+            self.update_collaboration_mode_indicator();
+            self.refresh_model_display();
+            self.request_redraw();
+        }
         if feature == Feature::Personality {
             self.sync_personality_command_enabled();
         }
@@ -7930,11 +8030,14 @@ impl ChatWidget {
             && let Some(mask) = self.active_collaboration_mask.as_mut()
             && mask.mode == Some(ModeKind::Plan)
         {
+            let collaboration_mode_overrides = self.config.collaboration_mode_overrides();
             if let Some(effort) = effort {
                 mask.reasoning_effort = Some(Some(effort));
-            } else if let Some(plan_mask) =
-                collaboration_modes::plan_mask(self.models_manager.as_ref())
-            {
+            } else if let Some(plan_mask) = collaboration_modes::plan_mask_with_overrides(
+                self.current_collaboration_mode.model(),
+                self.current_collaboration_mode.reasoning_effort(),
+                collaboration_mode_overrides.as_ref(),
+            ) {
                 mask.reasoning_effort = plan_mask.reasoning_effort;
             }
         }
@@ -8139,15 +8242,23 @@ impl ChatWidget {
     }
 
     fn collaboration_modes_enabled(&self) -> bool {
-        true
+        self.config.features.enabled(Feature::CollaborationModes)
     }
 
     fn initial_collaboration_mask(
-        _config: &Config,
-        models_manager: &ModelsManager,
+        config: &Config,
+        _models_manager: &ModelsManager,
         model_override: Option<&str>,
     ) -> Option<CollaborationModeMask> {
-        let mut mask = collaboration_modes::default_mask(models_manager)?;
+        if !config.features.enabled(Feature::CollaborationModes) {
+            return None;
+        }
+        let collaboration_mode_overrides = config.collaboration_mode_overrides();
+        let mut mask = collaboration_modes::default_mask_with_overrides(
+            config.model.as_deref().unwrap_or_default(),
+            config.model_reasoning_effort,
+            collaboration_mode_overrides.as_ref(),
+        )?;
         if let Some(model_override) = model_override {
             mask.model = Some(model_override.to_string());
         }
@@ -8246,8 +8357,11 @@ impl ChatWidget {
             return;
         }
 
-        if let Some(next_mask) = collaboration_modes::next_mask(
-            self.models_manager.as_ref(),
+        let collaboration_mode_overrides = self.config.collaboration_mode_overrides();
+        if let Some(next_mask) = collaboration_modes::next_mask_with_overrides(
+            self.current_collaboration_mode.model(),
+            self.current_collaboration_mode.reasoning_effort(),
+            collaboration_mode_overrides.as_ref(),
             self.active_collaboration_mask.as_ref(),
         ) {
             self.set_collaboration_mask(next_mask);
@@ -9229,21 +9343,225 @@ impl ChatWidget {
     }
 
     fn as_renderable(&self) -> RenderableItem<'_> {
-        let active_cell_renderable = match &self.active_cell {
-            Some(cell) => RenderableItem::Borrowed(cell).inset(Insets::tlbr(
-                /*top*/ 1, /*left*/ 0, /*bottom*/ 0, /*right*/ 0,
-            )),
-            None => RenderableItem::Owned(Box::new(())),
+        self.renderable(true)
+    }
+
+    fn measure_renderable(&self) -> RenderableItem<'_> {
+        self.renderable(false)
+    }
+
+    fn renderable(&self, fill_history: bool) -> RenderableItem<'_> {
+        let active_cell_renderable = self.active_cell_renderable();
+        let active_cell_renderable = if fill_history {
+            RenderableItem::Owned(Box::new(FillHeight::new(active_cell_renderable)))
+        } else {
+            active_cell_renderable
         };
+        let bottom_section = self.bottom_section_renderable();
         let mut flex = FlexRenderable::new();
         flex.push(/*flex*/ 1, active_cell_renderable);
         flex.push(
             /*flex*/ 0,
+            RenderableItem::Owned(Box::new(bottom_section)),
+        );
+        RenderableItem::Owned(Box::new(flex))
+    }
+
+    fn active_cell_renderable(&self) -> RenderableItem<'_> {
+        
+        match &self.active_cell {
+            Some(cell) => RenderableItem::Borrowed(cell).inset(Insets::tlbr(
+                /*top*/ 1, /*left*/ 0, /*bottom*/ 0, /*right*/ 0,
+            )),
+            None => RenderableItem::Owned(Box::new(())),
+        }
+    }
+
+    fn bottom_section_renderable(&self) -> ColumnRenderable<'_> {
+        let status_header = StatusHeaderBar::new(
+            self.model_display_name(),
+            self.effective_reasoning_effort(),
+            &self.config.cwd,
+            self.git_status.clone(),
+            self.rate_limit_snapshots_by_limit_id
+                .get("codex")
+                .or_else(|| self.rate_limit_snapshots_by_limit_id.values().next()),
+        );
+        let mut items: Vec<RenderableItem<'_>> = Vec::new();
+        if status_header.has_content() {
+            items.push(RenderableItem::Owned("".into()));
+            items.push(RenderableItem::Owned(Box::new(status_header)));
+            items.push(RenderableItem::Owned("".into()));
+        }
+        items.push(
             RenderableItem::Borrowed(&self.bottom_pane).inset(Insets::tlbr(
                 /*top*/ 1, /*left*/ 0, /*bottom*/ 0, /*right*/ 0,
             )),
         );
-        RenderableItem::Owned(Box::new(flex))
+        ColumnRenderable::with(items)
+    }
+}
+
+struct StatusHeaderBar {
+    model_name: Option<String>,
+    directory: Option<String>,
+    git_status: Option<GitStatusSummary>,
+    rate_limit_summary: Option<String>,
+}
+
+struct FillHeight<'a> {
+    child: RenderableItem<'a>,
+}
+
+impl<'a> FillHeight<'a> {
+    fn new(child: RenderableItem<'a>) -> Self {
+        Self { child }
+    }
+}
+
+impl Renderable for FillHeight<'_> {
+    fn render(&self, area: Rect, buf: &mut Buffer) {
+        self.child.render(area, buf);
+    }
+
+    fn desired_height(&self, _width: u16) -> u16 {
+        u16::MAX
+    }
+
+    fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
+        self.child.cursor_pos(area)
+    }
+}
+
+impl Renderable for StatusHeaderBar {
+    fn render(&self, area: Rect, buf: &mut Buffer) {
+        if let Some(line) = self.line() {
+            line.render(area, buf);
+        }
+    }
+
+    fn desired_height(&self, _width: u16) -> u16 {
+        if self.has_content() { 1 } else { 0 }
+    }
+}
+
+impl StatusHeaderBar {
+    fn new(
+        model_name: &str,
+        reasoning_effort: Option<ReasoningEffortConfig>,
+        cwd: &Path,
+        git_status: Option<GitStatusSummary>,
+        rate_limit_snapshot: Option<&RateLimitSnapshotDisplay>,
+    ) -> Self {
+        let model_name = (!model_name.trim().is_empty()).then(|| {
+            let effort_label = match reasoning_effort {
+                Some(ReasoningEffortConfig::Minimal) => "minimal",
+                Some(ReasoningEffortConfig::Low) => "low",
+                Some(ReasoningEffortConfig::Medium) => "medium",
+                Some(ReasoningEffortConfig::High) => "high",
+                Some(ReasoningEffortConfig::XHigh) => "xhigh",
+                Some(ReasoningEffortConfig::None) | None => "default",
+            };
+            if model_name.starts_with("codex-auto-") {
+                model_name.to_string()
+            } else {
+                format!("{model_name} {effort_label}")
+            }
+        });
+        let directory = cwd
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .or_else(|| {
+                if cwd.as_os_str().is_empty() {
+                    None
+                } else {
+                    Some("/".to_string())
+                }
+            })
+            .filter(|label| !label.trim().is_empty());
+        let rate_limit_summary = rate_limit_snapshot.and_then(|snapshot| {
+            snapshot.primary.as_ref().map(|primary| {
+                let remaining = (100.0 - primary.used_percent).clamp(0.0, 100.0).round() as i64;
+                let mut summary = format!("{remaining}%");
+                if let Some(resets_at) = primary.resets_at.as_ref()
+                    && !resets_at.trim().is_empty()
+                {
+                    summary = format!("{summary} {resets_at}");
+                }
+                summary
+            })
+        });
+        Self {
+            model_name,
+            directory,
+            git_status,
+            rate_limit_summary,
+        }
+    }
+
+    fn has_content(&self) -> bool {
+        self.model_name.is_some()
+            || self.directory.is_some()
+            || self.git_status.is_some()
+            || self.rate_limit_summary.is_some()
+    }
+
+    fn line(&self) -> Option<Line<'static>> {
+        if !self.has_content() {
+            return None;
+        }
+
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        let mut push_segment = |segment: Vec<Span<'static>>| {
+            if !spans.is_empty() {
+                spans.push(" │ ".dim());
+            }
+            spans.extend(segment);
+        };
+
+        if let Some(model_name) = self.model_name.as_ref() {
+            push_segment(vec![
+                "\u{ee9c} ".cyan(),
+                Span::from(model_name.clone()).cyan(),
+            ]);
+        }
+
+        if let Some(directory) = self.directory.as_ref() {
+            push_segment(vec![
+                "\u{f07c} ".yellow(),
+                Span::from(directory.clone()).yellow(),
+            ]);
+        }
+
+        if let Some(git_status) = self.git_status.as_ref() {
+            let mut segment = vec![
+                "\u{f418} ".blue(),
+                Span::from(git_status.branch.clone()).blue(),
+            ];
+            let ahead = git_status.ahead;
+            if ahead > 0 {
+                segment.push(Span::from(format!(" ↑{ahead}")).green());
+            }
+            let behind = git_status.behind;
+            if behind > 0 {
+                segment.push(Span::from(format!(" ↓{behind}")).red());
+            }
+            let changed = git_status.changed;
+            if changed > 0 {
+                segment.push(Span::from(format!(" +{changed}")).yellow());
+            }
+            let untracked = git_status.untracked;
+            if untracked > 0 {
+                segment.push(Span::from(format!(" ?{untracked}")).red());
+            }
+            push_segment(segment);
+        }
+
+        if let Some(summary) = self.rate_limit_summary.as_ref() {
+            push_segment(vec!["\u{f464} ".cyan(), Span::from(summary.clone()).cyan()]);
+        }
+
+        Some(Line::from(spans))
     }
 }
 
@@ -9290,6 +9608,7 @@ impl Drop for ChatWidget {
     fn drop(&mut self) {
         self.reset_realtime_conversation_state();
         self.stop_rate_limit_poller();
+        self.stop_git_status_poller();
     }
 }
 
@@ -9300,7 +9619,7 @@ impl Renderable for ChatWidget {
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        self.as_renderable().desired_height(width)
+        self.measure_renderable().desired_height(width)
     }
 
     fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {

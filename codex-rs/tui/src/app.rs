@@ -7718,7 +7718,7 @@ guardian_approval = true
         );
         assert_eq!(
             summary.resume_command,
-            Some("codex resume 123e4567-e89b-12d3-a456-426614174000".to_string())
+            Some("codext resume 123e4567-e89b-12d3-a456-426614174000".to_string())
         );
     }
 
@@ -7736,7 +7736,7 @@ guardian_approval = true
             .expect("summary");
         assert_eq!(
             summary.resume_command,
-            Some("codex resume my-session".to_string())
+            Some("codext resume my-session".to_string())
         );
     }
 }

@@ -31,3 +31,7 @@ This file captures the full set of changes currently in the working tree.
 - If changed, it reloads instructions before creating the turn, so updates made during a running turn take effect on the next turn.
 - When a reload happens, Codex emits an explicit warning in the transcript:
   `AGENTS.md instructions changed. Reloaded and applied starting this turn.`
+
+## TUI exit resume command
+
+- Added a fork requirement that the final resume hint shown after exiting Codex TUI uses `codext resume <session>` instead of `codex resume <session>`.

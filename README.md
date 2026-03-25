@@ -42,6 +42,8 @@ flowchart TD
 
 ## What Changed
 
+* Added `Ctrl+Shift+C` in the TUI composer to copy the current draft to the system clipboard; `Ctrl+C` keeps its existing behavior, and empty drafts still fall back to the old `Ctrl+C` path.
+* On WSL2, TUI draft copy reuses the existing Windows clipboard fallback so copied drafts still land in the Windows system clipboard.
 * Added a TUI status header with model/effort, cwd, git summary, and rate-limit status.
 * Collaboration mode presets now accept per-mode overrides and default to the active `/model` settings.
 * TUI watches `auth.json` for external login changes and reloads auth automatically (with a warning on account switch).

@@ -1865,6 +1865,8 @@ async fn make_chatwidget_manual(
         session_telemetry,
         session_header: SessionHeader::new(resolved_model.clone()),
         initial_user_message: None,
+        git_status: None,
+        git_status_poller: None,
         token_info: None,
         rate_limit_snapshots_by_limit_id: BTreeMap::new(),
         plan_type: None,
@@ -4768,6 +4770,72 @@ async fn ctrl_c_shutdown_works_with_caps_lock() {
     chat.handle_key_event(KeyEvent::new(KeyCode::Char('C'), KeyModifiers::CONTROL));
 
     assert_matches!(rx.try_recv(), Ok(AppEvent::Exit(ExitMode::ShutdownFirst)));
+}
+
+#[tokio::test]
+async fn ctrl_shift_c_copies_nonempty_draft_without_interrupting_running_task() {
+    let clipboard = crate::clipboard_text::ClipboardTestHarness::install(Ok(()));
+    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(None).await;
+
+    chat.on_task_started();
+    chat.bottom_pane.insert_str("draft message");
+
+    chat.handle_key_event(KeyEvent::new(
+        KeyCode::Char('C'),
+        KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+    ));
+
+    assert_eq!(clipboard.last_text(), Some("draft message".to_string()));
+    assert_eq!(chat.bottom_pane.composer_text(), "draft message");
+    assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
+
+    let cells = drain_insert_history(&mut rx);
+    assert_eq!(cells.len(), 1, "expected one info message");
+    let rendered = lines_to_single_string(&cells[0]);
+    assert!(rendered.contains("Copied composer draft to clipboard."));
+}
+
+#[tokio::test]
+async fn ctrl_shift_c_copies_expanded_pending_paste_text() {
+    let clipboard = crate::clipboard_text::ClipboardTestHarness::install(Ok(()));
+    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(None).await;
+    let large = "pasted text ".repeat(120);
+
+    chat.bottom_pane.handle_paste(large.clone());
+    let placeholder_text = chat.bottom_pane.composer_text();
+    assert_ne!(placeholder_text, large);
+
+    chat.handle_key_event(KeyEvent::new(
+        KeyCode::Char('C'),
+        KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+    ));
+
+    assert_eq!(clipboard.last_text(), Some(large));
+    assert_eq!(chat.bottom_pane.composer_text(), placeholder_text);
+    assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
+
+    let cells = drain_insert_history(&mut rx);
+    assert_eq!(cells.len(), 1, "expected one info message");
+    let rendered = lines_to_single_string(&cells[0]);
+    assert!(rendered.contains("Copied composer draft to clipboard."));
+}
+
+#[tokio::test]
+async fn ctrl_shift_c_with_empty_draft_interrupts_running_task() {
+    let clipboard = crate::clipboard_text::ClipboardTestHarness::install(Ok(()));
+    let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(None).await;
+
+    chat.on_task_started();
+    chat.handle_key_event(KeyEvent::new(
+        KeyCode::Char('C'),
+        KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+    ));
+
+    match op_rx.try_recv() {
+        Ok(Op::Interrupt) => {}
+        other => panic!("expected Op::Interrupt, got {other:?}"),
+    }
+    assert_eq!(clipboard.last_text(), None);
 }
 
 #[tokio::test]

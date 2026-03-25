@@ -2,6 +2,15 @@
 
 This file captures the full set of changes currently in the working tree.
 
+## TUI composer draft clipboard shortcut
+
+- Added `Ctrl+Shift+C` in the TUI composer to copy the current draft to the system clipboard when the input contains text.
+- Existing `Ctrl+C` behavior stays unchanged.
+- When the composer has no copyable text, `Ctrl+Shift+C` falls back to the existing `Ctrl+C` clear/interrupt/quit path.
+- On WSL2, composer draft copy reuses the existing Windows clipboard fallback so copies still land in the Windows system clipboard.
+- `Ctrl+Shift+C` now takes its own composer-copy path instead of falling through to the existing `Ctrl+C` clear/interrupt/quit behavior when draft text is present.
+- Added footer shortcut help text for the new draft-copy binding.
+
 ## TUI status header and polling
 
 - Added a status header above the composer that surfaces model + reasoning effort, current directory, git branch/ahead/behind/changes, and rate-limit remaining/reset time.

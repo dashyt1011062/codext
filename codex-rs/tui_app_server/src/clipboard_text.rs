@@ -29,9 +29,82 @@ use std::io::Write;
 use std::io::stdout;
 #[cfg(all(not(target_os = "android"), target_os = "linux"))]
 use std::process::Stdio;
+#[cfg(all(test, not(target_os = "android")))]
+use std::sync::Mutex;
+#[cfg(all(test, not(target_os = "android")))]
+use std::sync::MutexGuard;
+#[cfg(all(test, not(target_os = "android")))]
+use std::sync::OnceLock;
 
 #[cfg(all(not(target_os = "android"), target_os = "linux"))]
 use crate::clipboard_paste::is_probably_wsl;
+
+#[cfg(all(test, not(target_os = "android")))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TestClipboardMock {
+    result: Result<(), String>,
+    last_text: Option<String>,
+}
+
+#[cfg(all(test, not(target_os = "android")))]
+fn test_clipboard_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+#[cfg(all(test, not(target_os = "android")))]
+fn test_clipboard_mock() -> &'static Mutex<Option<TestClipboardMock>> {
+    static MOCK: OnceLock<Mutex<Option<TestClipboardMock>>> = OnceLock::new();
+    MOCK.get_or_init(|| Mutex::new(None))
+}
+
+#[cfg(all(test, not(target_os = "android")))]
+pub(crate) struct ClipboardTestHarness {
+    _guard: MutexGuard<'static, ()>,
+}
+
+#[cfg(all(test, not(target_os = "android")))]
+impl ClipboardTestHarness {
+    pub(crate) fn install(result: Result<(), String>) -> Self {
+        let guard = test_clipboard_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *test_clipboard_mock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(TestClipboardMock {
+            result,
+            last_text: None,
+        });
+        Self { _guard: guard }
+    }
+
+    pub(crate) fn last_text(&self) -> Option<String> {
+        test_clipboard_mock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .and_then(|mock| mock.last_text.clone())
+    }
+}
+
+#[cfg(all(test, not(target_os = "android")))]
+impl Drop for ClipboardTestHarness {
+    fn drop(&mut self) {
+        *test_clipboard_mock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    }
+}
+
+#[cfg(all(test, not(target_os = "android")))]
+fn maybe_copy_via_test_clipboard(text: &str) -> Option<Result<(), String>> {
+    let mut mock = test_clipboard_mock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mock = mock.as_mut()?;
+    mock.last_text = Some(text.to_string());
+    Some(mock.result.clone())
+}
 
 /// Copies user-visible text into the most appropriate clipboard for the
 /// current environment.
@@ -54,6 +127,11 @@ use crate::clipboard_paste::is_probably_wsl;
 /// unavailable or the fallback path also fails.
 #[cfg(not(target_os = "android"))]
 pub fn copy_text_to_clipboard(text: &str) -> Result<(), String> {
+    #[cfg(test)]
+    if let Some(result) = maybe_copy_via_test_clipboard(text) {
+        return result;
+    }
+
     if std::env::var_os("SSH_CONNECTION").is_some() || std::env::var_os("SSH_TTY").is_some() {
         return copy_via_osc52(text);
     }

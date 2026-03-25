@@ -4302,6 +4302,21 @@ impl ChatWidget {
                 modifiers,
                 kind: KeyEventKind::Press,
                 ..
+            } if modifiers.contains(KeyModifiers::CONTROL)
+                && modifiers.contains(KeyModifiers::SHIFT)
+                && c.eq_ignore_ascii_case(&'c') =>
+            {
+                if self.on_ctrl_shift_c() {
+                    return;
+                }
+                self.on_ctrl_c();
+                return;
+            }
+            KeyEvent {
+                code: KeyCode::Char(c),
+                modifiers,
+                kind: KeyEventKind::Press,
+                ..
             } if modifiers.contains(KeyModifiers::CONTROL) && c.eq_ignore_ascii_case(&'c') => {
                 self.on_ctrl_c();
                 return;
@@ -4749,7 +4764,7 @@ impl ChatWidget {
                 });
             }
             SlashCommand::Copy => {
-                let Some(text) = self.last_copyable_output.as_deref() else {
+                let Some(text) = self.last_copyable_output.clone() else {
                     self.add_info_message(
                         "`/copy` is unavailable before the first Codex output or right after a rollback."
                             .to_string(),
@@ -4758,23 +4773,15 @@ impl ChatWidget {
                     return;
                 };
 
-                let copy_result = clipboard_text::copy_text_to_clipboard(text);
-
-                match copy_result {
-                    Ok(()) => {
-                        let hint = self.agent_turn_running.then_some(
-                            "Current turn is still running; copied the latest completed output (not the in-progress response)."
-                                .to_string(),
-                        );
-                        self.add_info_message(
-                            "Copied latest Codex output to clipboard.".to_string(),
-                            hint,
-                        );
-                    }
-                    Err(err) => {
-                        self.add_error_message(format!("Failed to copy to clipboard: {err}"))
-                    }
-                }
+                let hint = self.agent_turn_running.then_some(
+                    "Current turn is still running; copied the latest completed output (not the in-progress response)."
+                        .to_string(),
+                );
+                self.copy_text_to_clipboard(
+                    &text,
+                    "Copied latest Codex output to clipboard.".to_string(),
+                    hint,
+                );
             }
             SlashCommand::Mention => {
                 self.insert_str("@");
@@ -9824,6 +9831,29 @@ impl ChatWidget {
         }
     }
 
+    /// Handles a Ctrl+Shift+C press at the chat-widget layer.
+    ///
+    /// This is a composer-only shortcut: when the main draft contains visible text and no modal
+    /// surface is active, copy that draft to the system clipboard. If there is nothing copyable,
+    /// fall back so the existing Ctrl+C behavior still applies.
+    fn on_ctrl_shift_c(&mut self) -> bool {
+        if self.realtime_conversation.is_live() || !self.bottom_pane.no_modal_or_popup_active() {
+            return false;
+        }
+
+        let text = self.bottom_pane.composer_text_with_pending();
+        if text.is_empty() {
+            return false;
+        }
+
+        self.copy_text_to_clipboard(
+            &text,
+            "Copied composer draft to clipboard.".to_string(),
+            /*hint*/ None,
+        );
+        true
+    }
+
     /// Handles a Ctrl+D press at the chat-widget layer.
     ///
     /// Ctrl-D only participates in quit when the composer is empty and no modal/popup is active.
@@ -9853,6 +9883,18 @@ impl ChatWidget {
 
         self.arm_quit_shortcut(key);
         true
+    }
+
+    fn copy_text_to_clipboard(
+        &mut self,
+        text: &str,
+        success_message: String,
+        hint: Option<String>,
+    ) {
+        match clipboard_text::copy_text_to_clipboard(text) {
+            Ok(()) => self.add_info_message(success_message, hint),
+            Err(err) => self.add_error_message(format!("Failed to copy to clipboard: {err}")),
+        }
     }
 
     /// True if `key` matches the armed quit shortcut and the window has not expired.

@@ -1,19 +1,20 @@
 ---
 name: codex-upstream-reapply
-description: "Tag-based upstream sync for a fork/secondary-development repo: fetch tags, let the user choose a tag, create a fresh branch from that tag, then read the old customization branch’s git changes + intent Markdown to re-implement the requirements on the new branch (no merge/rebase of the old branch)."
+description: "Tag-based upstream sync for a fork/secondary-development repo: fetch/filter rust-* tags, let the user choose a tag, create a fresh branch from that tag, then read the old customization branch’s git changes + intent Markdown to re-implement the requirements on the new branch (no merge/rebase of the old branch)."
 ---
 
 # Codex Upstream Reapply
 
 ## Overview
 
-用于“二开/魔改”场景的 tag 同步：先 `git fetch upstream --tags` 拉取 tags，让用户选择一个 tag 版本，从该 tag 创建新分支作为开发起点；然后读取旧二开分支的 git changes 与意图 Markdown，在新分支上“重实现”需求（不 merge/rebase 旧分支历史）。
+用于“二开/魔改”场景的 tag 同步：先按 `rust-*` 过滤拉取/查看 upstream tags，让用户选择一个 Rust tag 版本，从该 tag 创建新分支作为开发起点；然后读取旧二开分支的 git changes 与意图 Markdown，在新分支上“重实现”需求（不 merge/rebase 旧分支历史）。
 
 核心原则：`OLD_BRANCH` 的代码与提交历史只是参考材料，不是要直接照搬到 `NEW_BRANCH`。每次新的 upstream tag 都可能已经重构了相关模块，所以应当以 `CHANGED.md`、意图文档和旧分支行为为需求来源，基于当前 `TAG` 对应的代码结构重新实现。
 
 ## Inputs (每次明确这些东西)
 
 - `REMOTE`：拉取 tags 的 remote（默认 `upstream`）
+- `TAG_PATTERN`：tag 过滤规则（默认 `rust-*`）
 - `TAG`：你选择的 tag 版本（作为新分支起点）
 - `OLD_BRANCH`：原本二开的分支（包含改动 + 意图 Markdown；默认取“当前分支”）
 - `NEW_BRANCH`：从 tag 新建的分支名（脚本默认 `feat/<tag-name>`）
@@ -26,7 +27,7 @@ description: "Tag-based upstream sync for a fork/secondary-development repo: fet
 - 禁止运行 `cargo test`（不需要写/跑测试）。
 - 不得生成测试代码或快照文件：确保本次变更里没有新增/修改测试代码或 `*.snap`/`*.snap.new`。
 - 在 `codex-rs` 目录下执行 `cargo build -p codex-cli`，确认能正常启动运行。
-- 更新根目录 `README.md` 的 `Codex build` 徽章版本：使用选定 `TAG` 的版本号，并附加该 tag 指向的短 commit（例如 `v0.94.0-dce99bc`）。推荐使用 `https://img.shields.io/static/v1?label=codex%20build&message=<tag>-<short_commit>&color=2ea043`。
+- 更新根目录 `README.md` 的 `Codex build` 徽章版本：使用选定 `TAG` 的版本号，并附加该 tag 指向的短 commit（例如 `rust-v0.94.0-dce99bc`）。推荐使用 `https://img.shields.io/static/v1?label=codex%20build&message=<tag>-<short_commit>&color=2ea043`。
 
 ### 0) One-time setup（如果还没有）
 
@@ -47,11 +48,17 @@ git remote add upstream https://github.com/openai/codex.git
 ### 2) Fetch tags & choose TAG
 
 ```bash
-git fetch upstream --tags --prune
-git for-each-ref --sort=-creatordate --format='%(creatordate:iso8601) %(refname:short)' refs/tags
+git fetch upstream 'refs/tags/rust-*:refs/tags/rust-*' --prune
+git for-each-ref --sort=-creatordate --format='%(creatordate:iso8601) %(refname:short)' 'refs/tags/rust-*'
 ```
 
-让用户从列表中选择一个 `TAG`（例如 `v0.2`）。
+如只想先查看远端候选而不先写入本地 tags，也可以：
+
+```bash
+git ls-remote --tags --refs upstream 'rust-*'
+```
+
+让用户从列表中选择一个 `TAG`（例如 `rust-v0.0.2505191518`）。
 
 ### 3) Generate a re-implementation bundle & create NEW_BRANCH
 
@@ -62,6 +69,8 @@ git for-each-ref --sort=-creatordate --format='%(creatordate:iso8601) %(refname:
 bash .agents/skills/codex-upstream-reapply/scripts/start_from_tag.sh \
   --remote upstream --tag TAG
 ```
+
+脚本默认只 fetch/list `rust-*` tags；如确需放宽范围，再显式传 `--tag-pattern <glob>`。
 
 它会记录：
 
@@ -76,7 +85,7 @@ bash .agents/skills/codex-upstream-reapply/scripts/start_from_tag.sh \
 ```bash
 bash .agents/skills/codex-upstream-reapply/scripts/start_from_tag.sh \
   --remote upstream --tag TAG \
-  --old-base-tag v0.1
+  --old-base-tag rust-vX.Y.Z
 ```
 
 ### 4) Read OLD_BRANCH as reference (理解需求与意图，而不是直接套 patch)
@@ -170,7 +179,7 @@ git diff "${BASE_COMMIT}..OLD_BRANCH"
 如果推断结果可疑（例如 `OLD_BRANCH` 的历史标记与 `TAG` 不一致），脚本会停止并要求你明确指定：
 
 ```bash
---old-base-tag v0.1
+--old-base-tag rust-vX.Y.Z
 ```
 
-这样可以准确得到 “从 v0.1 到 OLD_BRANCH 的全部二开变更”。
+这样可以准确得到 “从指定 Rust tag 到 OLD_BRANCH 的全部二开变更”。

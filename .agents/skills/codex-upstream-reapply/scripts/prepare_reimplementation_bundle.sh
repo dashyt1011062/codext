@@ -18,6 +18,7 @@ Options:
   --base-ref <ref>        Selected tag (or commit ref) used to infer merge-base (required)
   --old-base-tag <tag>    Explicit base tag for OLD_BRANCH (overrides merge-base inference)
   --remote <remote>       Remote for optional tag fetch (default: upstream)
+  --tag-pattern <glob>    Only fetch tags matching this glob (default: rust-*)
   --out <dir>             Output directory (default: /tmp/codex-upstream-reapply/<repo>/<old>/<timestamp>)
   --copy-all              Copy ALL changed files (ACMR) from old branch into bundle/old/
   --no-copy-docs          Do not copy changed Markdown docs into bundle/old/ (docs are copied by default)
@@ -71,6 +72,10 @@ ref_commit() {
   git rev-parse "${1}^{commit}"
 }
 
+tag_refspec() {
+  printf 'refs/tags/%s:refs/tags/%s\n' "${TAG_PATTERN}" "${TAG_PATTERN}"
+}
+
 hint_tag_from_history() {
   git describe --tags --abbrev=0 "${1}" 2>/dev/null || true
 }
@@ -79,6 +84,7 @@ OLD_BRANCH=""
 BASE_REF=""
 OLD_BASE_TAG=""
 REMOTE="upstream"
+TAG_PATTERN="rust-*"
 OUT_DIR=""
 COPY_ALL=0
 COPY_DOCS=1
@@ -100,6 +106,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --remote)
       REMOTE="${2:-}"
+      shift 2
+      ;;
+    --tag-pattern)
+      TAG_PATTERN="${2:-}"
       shift 2
       ;;
     --out)
@@ -141,8 +151,8 @@ fi
 [[ -n "${REMOTE}" ]] || die "--remote must not be empty"
 
 if [[ "${NO_FETCH}" != "1" ]]; then
-  echo "[INFO] Fetching tags from ${REMOTE} (best-effort)..."
-  if ! git fetch "${REMOTE}" --tags --prune; then
+  echo "[INFO] Fetching tags matching ${TAG_PATTERN} from ${REMOTE} (best-effort)..."
+  if ! git fetch "${REMOTE}" "$(tag_refspec)" --prune; then
     echo "[WARN] git fetch failed; continuing with local refs."
   fi
 fi
@@ -210,6 +220,7 @@ cat > "${OUT_DIR}/META.md" <<EOF
 - repo_name: \`${repo_name}\`
 - created_utc: \`${ts}\`
 - remote: \`${REMOTE}\`
+- tag_pattern: \`${TAG_PATTERN}\`
 - base_ref: \`${BASE_REF}\`
 - base_ref_commit: \`${base_ref_commit}\`
 - old_base_tag: \`${OLD_BASE_TAG}\`
@@ -224,7 +235,7 @@ cat > "${OUT_DIR}/META.md" <<EOF
 ## Suggested next step
 
 \`\`\`bash
-git fetch ${REMOTE} --tags --prune
+git fetch ${REMOTE} 'refs/tags/${TAG_PATTERN}:refs/tags/${TAG_PATTERN}' --prune
 git switch -c <NEW_BRANCH> ${BASE_REF}
 \`\`\`
 EOF

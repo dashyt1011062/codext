@@ -13,6 +13,7 @@ Usage:
 
 Options:
   --remote <remote>       Remote to fetch tags from (default: upstream)
+  --tag-pattern <glob>    Only fetch/list tags matching this glob (default: rust-*)
   --tag <tag>             Selected tag (required; if missing, list tags and exit)
   --old-branch <name>     Old customization branch (default: current branch)
   --new-branch <name>     New branch to create from tag (default: feat/<tag-name>)
@@ -47,7 +48,25 @@ ensure_no_in_progress_ops() {
 
 list_tags() {
   git for-each-ref --sort=-creatordate \
-    --format='%(creatordate:iso8601) %(refname:short) %(objectname:short)' refs/tags
+    --format='%(creatordate:iso8601) %(refname:short) %(objectname:short)' \
+    "refs/tags/${TAG_PATTERN}"
+}
+
+tag_refspec() {
+  printf 'refs/tags/%s:refs/tags/%s\n' "${TAG_PATTERN}" "${TAG_PATTERN}"
+}
+
+tag_matches_pattern() {
+  local tag_name="$1"
+
+  case "${tag_name}" in
+    ${TAG_PATTERN})
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 copy_file_from_old_branch() {
@@ -76,6 +95,7 @@ copy_path_from_old_branch() {
 }
 
 REMOTE="upstream"
+TAG_PATTERN="rust-*"
 TAG=""
 OLD_BRANCH=""
 NEW_BRANCH=""
@@ -93,6 +113,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --tag)
       TAG="${2:-}"
+      shift 2
+      ;;
+    --tag-pattern)
+      TAG_PATTERN="${2:-}"
       shift 2
       ;;
     --old-branch)
@@ -137,21 +161,23 @@ require_git_repo
 ensure_no_in_progress_ops
 
 if [[ "${NO_FETCH}" != "1" ]]; then
-  echo "[INFO] Fetching tags from ${REMOTE} (best-effort)..."
-  if ! git fetch "${REMOTE}" --tags --prune; then
+  echo "[INFO] Fetching tags matching ${TAG_PATTERN} from ${REMOTE} (best-effort)..."
+  if ! git fetch "${REMOTE}" "$(tag_refspec)" --prune; then
     echo "[WARN] git fetch failed; continuing with local refs."
   fi
 fi
 
 if [[ -z "${TAG}" ]]; then
-  echo "[INFO] Available tags (newest first):"
+  echo "[INFO] Available tags matching ${TAG_PATTERN} (newest first):"
   list_tags | head -n 50
   echo
-  echo "Re-run with: --tag <tag>"
+  echo "Re-run with: --tag <tag> [--tag-pattern <glob>]"
   exit 0
 fi
 
-git rev-parse --verify "${TAG}^{commit}" >/dev/null 2>&1 || die "Tag not found: ${TAG}"
+tag_name="${TAG#refs/tags/}"
+tag_matches_pattern "${tag_name}" || die "Selected tag ${TAG} does not match --tag-pattern ${TAG_PATTERN}"
+git show-ref --verify --quiet "refs/tags/${tag_name}" || die "Tag not found: ${TAG}. If it exists upstream but was filtered out, retry with --tag-pattern <glob>."
 
 if [[ -z "${OLD_BRANCH}" ]]; then
   OLD_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
@@ -161,7 +187,6 @@ fi
 [[ "${OLD_BRANCH}" != "HEAD" ]] || die "Detached HEAD; pass --old-branch <name>."
 
 if [[ -z "${NEW_BRANCH}" ]]; then
-  tag_name="${TAG#refs/tags/}"
   NEW_BRANCH="feat/${tag_name}"
 fi
 
@@ -191,6 +216,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 bundle_script="${script_dir}/prepare_reimplementation_bundle.sh"
 
 bundle_args=(--old-branch "${OLD_BRANCH}" --base-ref "${TAG}" --remote "${REMOTE}" --out "${OUT_DIR}")
+bundle_args+=(--tag-pattern "${TAG_PATTERN}")
 if [[ -n "${OLD_BASE_TAG}" ]]; then
   bundle_args+=(--old-base-tag "${OLD_BASE_TAG}")
 fi

@@ -11,24 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  metadata:
-    runs-on: ubuntu-latest
-    outputs:
-      release_version: ${{ steps.compute.outputs.release_version }}
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Compute release version
-        id: compute
-        shell: bash
-        run: |
-          set -euo pipefail
-          base_version="$(grep -m1 '^version' codex-rs/Cargo.toml | sed -E 's/version *= *"([^"]+)".*/\1/')"
-          short_sha="${GITHUB_SHA::7}"
-          echo "release_version=${base_version}-${short_sha}" >> "$GITHUB_OUTPUT"
-
   build-unix:
-    needs: metadata
     name: Build - ${{ matrix.runner }} - ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
@@ -73,6 +56,30 @@ jobs:
           echo "CARGO_HOME=${cargo_home}" >> "$GITHUB_ENV"
           echo "${cargo_home}/bin" >> "$GITHUB_PATH"
           : > "${cargo_home}/config.toml"
+
+      - name: Cache Cargo home and target dir
+        if: ${{ matrix.target == 'x86_64-unknown-linux-musl' }}
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/.cargo-home/registry
+            ${{ github.workspace }}/.cargo-home/git
+            codex-rs/target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('codex-rs/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
+
+      - name: Cache Cargo home and target dir
+        if: ${{ matrix.target != 'x86_64-unknown-linux-musl' }}
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            codex-rs/target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('codex-rs/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
 
       - name: Install Zig
         if: ${{ matrix.target == 'x86_64-unknown-linux-musl' }}
@@ -148,7 +155,7 @@ jobs:
 
       - name: Cargo build
         shell: bash
-        run: cargo build --target ${{ matrix.target }} --release --bin codex
+        run: cargo build --locked --target ${{ matrix.target }} --release -p codex-cli --bin codex
 
       - uses: actions/upload-artifact@v7
         with:
@@ -157,7 +164,6 @@ jobs:
           if-no-files-found: error
 
   build-windows:
-    needs: metadata
     name: Build - windows-2025 - ${{ matrix.target }}
     runs-on: windows-2025
     timeout-minutes: 90
@@ -179,10 +185,23 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Cache Cargo home and target dir
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            codex-rs/target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('codex-rs/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
+
       - name: Cargo build
         shell: bash
         run: |
-          cargo build --target ${{ matrix.target }} --release \
+          cargo build --locked --target ${{ matrix.target }} --release \
+            -p codex-cli \
+            -p codex-windows-sandbox \
             --bin codex \
             --bin codex-windows-sandbox-setup \
             --bin codex-command-runner
@@ -198,7 +217,6 @@ jobs:
 
   publish-npm:
     needs:
-      - metadata
       - build-unix
       - build-windows
     runs-on: ubuntu-latest
@@ -208,6 +226,15 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+
+      - name: Compute release version
+        id: compute
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_version="$(grep -m1 '^version' codex-rs/Cargo.toml | sed -E 's/version *= *"([^"]+)".*/\1/')"
+          short_sha="${GITHUB_SHA::7}"
+          echo "release_version=${base_version}-${short_sha}" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -258,7 +285,7 @@ jobs:
 
       - name: Stage npm tarballs
         env:
-          VERSION: ${{ needs.metadata.outputs.release_version }}
+          VERSION: ${{ steps.compute.outputs.release_version }}
         shell: bash
         run: |
           set -euo pipefail
@@ -297,7 +324,7 @@ jobs:
 
       - name: Publish to npm
         env:
-          VERSION: ${{ needs.metadata.outputs.release_version }}
+          VERSION: ${{ steps.compute.outputs.release_version }}
         shell: bash
         run: |
           set -euo pipefail

@@ -1,6 +1,6 @@
 ---
 name: status-header
-description: Enforce the standard TUI status header layout, icons, colors, and rate-limit summary format when implementing or editing the status header (ratatui Line/Span), and keep equivalent `tui` / `tui_app_server` surfaces aligned.
+description: 'Enforce the standard TUI status header layout, icons, colors, and rate-limit summary format, and keep equivalent tui and tui_app_server surfaces aligned.'
 ---
 
 # Status Header

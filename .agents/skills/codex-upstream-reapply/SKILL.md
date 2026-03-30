@@ -1,6 +1,6 @@
 ---
 name: codex-upstream-reapply
-description: "Tag-based upstream sync for a fork/secondary-development repo: by default auto-pick the latest stable rust-vX.Y.Z tag and current branch, create a fresh branch from that tag, then read the old customization branch’s git changes + intent Markdown to re-implement the requirements on the new branch (no merge/rebase of the old branch)."
+description: 'Reapply a fork or secondary-development branch onto the latest stable rust-vX.Y.Z tag by creating a fresh branch from that tag and re-implementing the old branch intent without merge or rebase.'
 ---
 
 # Codex Upstream Reapply

@@ -7,14 +7,50 @@ An opinionated Codex CLI. This is strictly a personal hobby project, forked from
 ![TUI](
 https://github.com/user-attachments/assets/127abbc2-cb30-4d6e-8a81-ce707260c045)
 
+> [!IMPORTANT]
+> **DO NOT USE IN PRODUCTION.**
+> To keep upstream sync easy, we do not write test code for what we changed. This project is for experimental use only.
+
+* **DX Focused:** Focus strictly on optimizing developer experience, **without adding new features**.
+* **Upstream Sync:** We sync with the upstream repository regularly.
+
 ## Quick Start
 
-Build from source:
+Choose one of these two ways:
+
+* Install from npm:
+
+```shell
+npm i -g @loongphy/codext
+```
+
+* Build from source:
 
 ```shell
 cd codex-rs
 cargo run --bin codex
 ```
+
+## Features
+
+> Full change log: see [CHANGED.md](./CHANGED.md).
+
+* `Ctrl+Shift+C` in the TUI composer copies the current draft to the system clipboard; `Ctrl+C` keeps its existing behavior, and empty drafts still fall back to the old `Ctrl+C` path.
+* TUI status header with model/effort, cwd, git summary, and rate-limit status.
+* Collaboration mode presets accept per-mode overrides and default to the active `/model` settings. Example:
+
+  ```toml
+  # config.toml
+  [collaboration_modes.plan]
+  model = "gpt-5.4"
+  reasoning_effort = "xhigh"
+
+  [collaboration_modes.code]
+  model = "gpt-5.4"
+  ```
+
+* TUI watches `auth.json` for external login changes and reloads auth automatically, with a warning on account switch. This works well with [codex-auth](https://github.com/Loongphy/codex-auth) when you refresh or switch login state outside the TUI.
+* AGENTS.md and project-doc instructions are refreshed on each new user turn, and Codex shows an explicit warning when a refresh is applied.
 
 ## Project Goals
 
@@ -31,43 +67,6 @@ flowchart TD
     E --> F[Re-implement changes on new branch]
     F --> G[Sanity check diffs vs tag]
     G --> H[Force-push to fork main]
-```
-
-> [!IMPORTANT]
-> **DO NOT USE IN PRODUCTION.**
-> To keep upstream sync easy, we do not write test code for what we changed. This project is for experimental use only.
-
-* **DX Focused:** Focus strictly on optimizing developer experience, **without adding new features**.
-* **Upstream Sync:** We sync with the upstream repository regularly.
-
-## What Changed
-
-* Added `Ctrl+Shift+C` in the TUI composer to copy the current draft to the system clipboard; `Ctrl+C` keeps its existing behavior, and empty drafts still fall back to the old `Ctrl+C` path.
-* On WSL2, TUI draft copy reuses the existing Windows clipboard fallback so copied drafts still land in the Windows system clipboard.
-* Added a TUI status header with model/effort, cwd, git summary, and rate-limit status.
-* Collaboration mode presets now accept per-mode overrides and default to the active `/model` settings.
-* TUI watches `auth.json` for external login changes and reloads auth automatically (with a warning on account switch).
-* AGENTS.md/project-doc instructions are refreshed on each new user turn, and Codex shows an explicit warning when a refresh is applied.
-* Full change log: see [CHANGED.md](./CHANGED.md).
-
-## AGENT Local development check
-
-1. DO NOT update any test codes
-2. After making code changes, verify the CLI still launches:
-
-```shell
-cd ./codex-rs
-cargo run --bin codex
-```
-
-```toml
-# config.toml
-[collaboration_modes.plan]
-model = "gpt-5.4"
-reasoning_effort = "xhigh"
-
-[collaboration_modes.code]
-model = "gpt-5.4"
 ```
 
 ## Skills

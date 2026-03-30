@@ -38,6 +38,11 @@ codext
 - Users install one top-level package: `@loongphy/codext`.
 - Platform-specific native payloads are published separately and selected at runtime based on the current platform and architecture.
 - This layout is acceptable because it avoids downloading every platform binary on every install and keeps install size smaller.
+- The current supported platform payloads are:
+  - `linux-x64`
+  - `darwin-x64`
+  - `darwin-arm64`
+  - `win32-x64`
 
 ## Versioning requirements
 

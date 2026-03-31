@@ -115,9 +115,9 @@ bash .agents/skills/codex-upstream-reapply/scripts/start_from_tag.sh \
 - 变更文件清单、diff patch、commit 列表
 -（默认）复制所有“变更过的 Markdown 意图文档”的旧版内容到 bundle 里
 -（可选）用 `--copy-all` 复制所有变更文件的旧版内容（用于离线阅读）
-并且会固定复制 `OLD_BRANCH` 的 `README.md`、`CHANGED.md`、`.agents/skills/` 到 `NEW_BRANCH`；对于 npm / release / CI 相关改动，则会按 `OLD_BRANCH` 相对基线 tag 的 git changes 自动搬运，包括删除。
+并且会固定复制 `OLD_BRANCH` 的 `README.md`、`CHANGED.md`、`.agents/skills/` 到 `NEW_BRANCH`；对于 npm / release / CI 相关改动，则会按 `OLD_BRANCH` 相对基线 tag 的 git changes 自动搬运，包括删除。只要 `OLD_BRANCH` 带有 `references/npm-release.md` 对应的 skill 规则，就必须执行 npm release 文档里定义的强制动作，而不是只把它当成“默认原则”。
 
-如果分支上包含 codext npm / release 相关改动，必须先看 `references/npm-release-carry-over.md`。这份文档定义了哪些路径必须直接复制、哪些删除必须保留、哪些情况可以按当前 tag 结构由 agent 自行判断。
+如果分支上包含 codext npm / release 相关改动，必须先看 `references/npm-release.md`。这份文档明确要求：在 `NEW_BRANCH` 上用 `OLD_BRANCH` 的 `rust-release.yml` 覆盖当前 tag 分支内容，删除其他 workflow，并直接复制 `.github/scripts/install-musl-build-tools.sh`、`.github/scripts/rusty_v8_bazel.py`、`codex-cli/package.json`、`codex-cli/bin/codex.js`、`codex-cli/bin/rg`、`codex-cli/scripts/build_npm_package.py`、`codex-cli/scripts/install_native_deps.py`；这些是必做项，不是建议。只有这些动作完成后，才允许评估上游 / 新 tag 额外新增或改动的 CI 是否要合并或忽略。
 
 如果这一步复制了 `README.md` 到 `NEW_BRANCH`，则紧接着必须更新 `NEW_BRANCH` 根目录 `AGENTS.md`，补充一段当前任务说明，至少包含这些信息：
 

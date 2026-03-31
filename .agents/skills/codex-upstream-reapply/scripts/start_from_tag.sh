@@ -146,28 +146,28 @@ matches_release_carry_over_path() {
   local path="$1"
 
   case "${path}" in
-    ci|ci/*)
+    .github/workflows/rust-release.yml)
       return 0
       ;;
-    .github/workflows|.github/workflows/*)
+    .github/scripts/install-musl-build-tools.sh)
       return 0
       ;;
-    .github/actions|.github/actions/*)
-      return 0
-      ;;
-    .github/scripts|.github/scripts/*)
+    .github/scripts/rusty_v8_bazel.py)
       return 0
       ;;
     codex-cli/package.json)
       return 0
       ;;
-    codex-cli/bin|codex-cli/bin/*)
+    codex-cli/bin/codex.js)
       return 0
       ;;
-    codex-cli/scripts|codex-cli/scripts/*)
+    codex-cli/bin/rg)
       return 0
       ;;
-    docs/npm-release.md)
+    codex-cli/scripts/build_npm_package.py)
+      return 0
+      ;;
+    codex-cli/scripts/install_native_deps.py)
       return 0
       ;;
     *)
@@ -261,6 +261,46 @@ readonly REAPPLY_COPY_PATHS=(
   "CHANGED.md"
   ".agents/skills"
 )
+
+readonly REQUIRED_NPM_RELEASE_COPY_PATHS=(
+  ".github/scripts/install-musl-build-tools.sh"
+  ".github/scripts/rusty_v8_bazel.py"
+  "codex-cli/package.json"
+  "codex-cli/bin/codex.js"
+  "codex-cli/bin/rg"
+  "codex-cli/scripts/build_npm_package.py"
+  "codex-cli/scripts/install_native_deps.py"
+)
+
+readonly NPM_RELEASE_SKILL_REF=".agents/skills/codex-upstream-reapply/references/npm-release.md"
+
+has_npm_release_reapply() {
+  local old_branch="$1"
+  path_exists_in_ref "${old_branch}" "${NPM_RELEASE_SKILL_REF}"
+}
+
+apply_required_npm_release_carry_over() {
+  local old_branch="$1"
+  local required_workflow=".github/workflows/rust-release.yml"
+  local workflow_path=""
+  local path=""
+
+  path_exists_in_ref "${old_branch}" "${required_workflow}" \
+    || die "OLD_BRANCH has ${NPM_RELEASE_SKILL_REF} but is missing ${required_workflow}"
+
+  echo "[INFO] Applying mandatory npm-release carry-over from ${old_branch}..."
+  copy_entry_from_old_branch "${old_branch}" "${required_workflow}"
+
+  while IFS= read -r workflow_path; do
+    [[ -n "${workflow_path}" ]] || continue
+    [[ "${workflow_path}" == "${required_workflow}" ]] && continue
+    remove_path_from_new_branch "${workflow_path}"
+  done < <(git ls-files '.github/workflows/*')
+
+  for path in "${REQUIRED_NPM_RELEASE_COPY_PATHS[@]}"; do
+    copy_entry_from_old_branch "${old_branch}" "${path}"
+  done
+}
 
 REMOTE="upstream"
 TAG_PATTERN="rust-*"
@@ -420,6 +460,10 @@ echo "[INFO] Copying fixed carry-over files from ${OLD_BRANCH}..."
 for path in "${REAPPLY_COPY_PATHS[@]}"; do
   copy_entry_from_old_branch "${OLD_BRANCH}" "${path}"
 done
+
+if has_npm_release_reapply "${OLD_BRANCH}"; then
+  apply_required_npm_release_carry_over "${OLD_BRANCH}"
+fi
 
 echo "[INFO] Replaying npm/release/CI carry-over changes from git diff..."
 apply_release_carry_over_changes "${carry_over_base_commit}" "${OLD_BRANCH}"

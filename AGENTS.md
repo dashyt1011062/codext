@@ -1,5 +1,13 @@
 # Rust/codex-rs
 
+## Temporary upstream reapply constraints
+
+- Current branch `feat/rust-v0.118.0` is performing an upstream reapply onto `rust-v0.118.0`.
+- For this reapply, only implementation code and necessary documentation may be changed.
+- Do not write or modify any test code, snapshot files, or `*.snap` / `*.snap.new` artifacts.
+- Do not run lint / format / auto-fix commands during this task, including `cargo fmt`, `just fmt`, `cargo clippy`, `cargo clippy --fix`, `just fix`, or `cargo insta ...`.
+- This task is considered complete only when the `codex-upstream-reapply` skill acceptance criteria are satisfied, including `cargo build -p codex-cli` and the final `cargo build -p codex-cli --release` build in `codex-rs`.
+
 In the codex-rs folder where the rust code lives:
 
 - Crate names are prefixed with `codex-`. For example, the `core` folder's crate is named `codex-core`

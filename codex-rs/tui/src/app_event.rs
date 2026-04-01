@@ -29,6 +29,7 @@ use codex_utils_approval_presets::ApprovalPreset;
 use crate::bottom_pane::ApprovalRequest;
 use crate::bottom_pane::StatusLineItem;
 use crate::bottom_pane::TerminalTitleItem;
+use crate::git_status::GitStatusSummary;
 use crate::history_cell::HistoryCell;
 
 use codex_core::config::types::ApprovalsReviewer;
@@ -137,9 +138,20 @@ pub(crate) enum AppEvent {
         matches: Vec<FileMatch>,
     },
 
+    /// Auth file change detected; reload auth state.
+    AuthFileChanged,
+
+    /// Retry auth reload after a delay; attempt starts at 2.
+    AuthFileChangedRetry {
+        attempt: u8,
+    },
+
     /// Result of refreshing rate limits
     #[allow(dead_code)]
     RateLimitSnapshotFetched(RateLimitSnapshot),
+
+    /// Result of refreshing git status information.
+    GitStatusFetched(Option<GitStatusSummary>),
 
     /// Result of prefetching connectors.
     ConnectorsLoaded {

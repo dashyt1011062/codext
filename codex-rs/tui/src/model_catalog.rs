@@ -7,6 +7,7 @@ use std::convert::Infallible;
 #[derive(Debug, Clone)]
 pub(crate) struct ModelCatalog {
     models: Vec<ModelPreset>,
+    #[cfg_attr(not(test), allow(dead_code))]
     collaboration_modes_config: CollaborationModesConfig,
 }
 
@@ -25,6 +26,7 @@ impl ModelCatalog {
         Ok(self.models.clone())
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn list_collaboration_modes(&self) -> Vec<CollaborationModeMask> {
         builtin_collaboration_mode_presets(self.collaboration_modes_config)
     }

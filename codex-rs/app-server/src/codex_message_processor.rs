@@ -191,6 +191,7 @@ use codex_core::SteerInputError;
 use codex_core::ThreadConfigSnapshot;
 use codex_core::ThreadManager;
 use codex_core::ThreadSortKey as CoreThreadSortKey;
+use codex_core::auth::AuthReloadStatus;
 use codex_core::auth::AuthMode as CoreAuthMode;
 use codex_core::auth::CLIENT_ID;
 use codex_core::auth::login_with_api_key;
@@ -221,6 +222,8 @@ use codex_core::mcp::auth::resolve_oauth_scopes;
 use codex_core::mcp::collect_mcp_snapshot;
 use codex_core::mcp::group_tools_by_server;
 use codex_core::models_manager::collaboration_mode_presets::CollaborationModesConfig;
+use codex_core::models_manager::collaboration_mode_presets::collaboration_mode_presets_with_overrides_and_config;
+use codex_core::models_manager::manager::RefreshStrategy;
 use codex_core::parse_cursor;
 use codex_core::plugins::MarketplaceError;
 use codex_core::plugins::MarketplacePluginSource;
@@ -851,11 +854,18 @@ impl CodexMessageProcessor {
             ClientRequest::CollaborationModeList { request_id, params } => {
                 let outgoing = self.outgoing.clone();
                 let thread_manager = self.thread_manager.clone();
+                let config = self.config.clone();
                 let request_id = to_connection_request_id(request_id);
 
                 tokio::spawn(async move {
-                    Self::list_collaboration_modes(outgoing, thread_manager, request_id, params)
-                        .await;
+                    Self::list_collaboration_modes(
+                        outgoing,
+                        thread_manager,
+                        config,
+                        request_id,
+                        params,
+                    )
+                    .await;
                 });
             }
             ClientRequest::MockExperimentalMethod { request_id, params } => {
@@ -1608,6 +1618,21 @@ impl CodexMessageProcessor {
 
     async fn get_account(&self, request_id: ConnectionRequestId, params: GetAccountParams) {
         let do_refresh = params.refresh_token;
+
+        if params.reload_auth_from_storage {
+            match self.auth_manager.reload_with_status() {
+                AuthReloadStatus::Reloaded { .. } => {}
+                AuthReloadStatus::Failed => {
+                    let error = JSONRPCErrorError {
+                        code: INTERNAL_ERROR_CODE,
+                        message: "failed to reload auth from storage".to_string(),
+                        data: None,
+                    };
+                    self.outgoing.send_error(request_id, error).await;
+                    return;
+                }
+            }
+        }
 
         self.refresh_token_if_requested(do_refresh).await;
 
@@ -4683,15 +4708,31 @@ impl CodexMessageProcessor {
     async fn list_collaboration_modes(
         outgoing: Arc<OutgoingMessageSender>,
         thread_manager: Arc<ThreadManager>,
+        config: Arc<Config>,
         request_id: ConnectionRequestId,
         params: CollaborationModeListParams,
     ) {
         let CollaborationModeListParams {} = params;
-        let items = thread_manager
-            .list_collaboration_modes()
-            .into_iter()
-            .map(Into::into)
-            .collect();
+        let config = (*config).clone();
+        let collaboration_modes_config = CollaborationModesConfig {
+            default_mode_request_user_input: config
+                .features
+                .enabled(Feature::DefaultModeRequestUserInput),
+        };
+        let collaboration_mode_overrides = config.collaboration_mode_overrides();
+        let base_model = thread_manager
+            .get_models_manager()
+            .get_default_model(&config.model, RefreshStrategy::Offline)
+            .await;
+        let items = collaboration_mode_presets_with_overrides_and_config(
+            &base_model,
+            config.model_reasoning_effort,
+            collaboration_mode_overrides.as_ref(),
+            collaboration_modes_config,
+        )
+        .into_iter()
+        .map(Into::into)
+        .collect();
         let response = CollaborationModeListResponse { data: items };
         outgoing.send_response(request_id, response).await;
     }

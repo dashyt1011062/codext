@@ -391,7 +391,8 @@ const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 const FAST_STATUS_MODEL: &str = "gpt-5.4";
 const DEFAULT_STATUS_LINE_ITEMS: [&str; 3] =
     ["model-with-reasoning", "context-remaining", "current-dir"];
-const RATE_LIMIT_POLL_INTERVAL_SECS: u64 = 15;
+const RATE_LIMIT_REFRESH_INTERVAL_SECS: u64 = 15;
+const GIT_STATUS_POLL_INTERVAL_SECS: u64 = 15;
 // Track information about an in-flight exec command.
 struct RunningCommand {
     command: Vec<String>,
@@ -769,6 +770,7 @@ pub(crate) struct ChatWidget {
     token_info: Option<TokenUsageInfo>,
     rate_limit_snapshots_by_limit_id: BTreeMap<String, RateLimitSnapshotDisplay>,
     plan_type: Option<PlanType>,
+    rate_limit_poller: Option<JoinHandle<()>>,
     git_status: Option<GitStatusSummary>,
     git_status_poller: Option<JoinHandle<()>>,
     rate_limit_warnings: RateLimitWarningState,
@@ -2724,6 +2726,7 @@ impl ChatWidget {
             self.rate_limit_snapshots_by_limit_id.clear();
         }
         self.refresh_status_line();
+        self.request_redraw();
     }
     /// Finalize any active exec as failed and stop/clear agent-turn UI state.
     ///
@@ -4731,6 +4734,7 @@ impl ChatWidget {
             token_info: None,
             rate_limit_snapshots_by_limit_id: BTreeMap::new(),
             plan_type: initial_plan_type,
+            rate_limit_poller: None,
             git_status: None,
             git_status_poller: None,
             rate_limit_warnings: RateLimitWarningState::default(),
@@ -4853,6 +4857,7 @@ impl ChatWidget {
             .bottom_pane
             .set_connectors_enabled(widget.connectors_enabled());
         widget.refresh_status_surfaces();
+        widget.prefetch_rate_limits();
         widget.start_git_status_poller();
 
         widget
@@ -7534,7 +7539,11 @@ impl ChatWidget {
         );
     }
 
-    fn stop_rate_limit_poller(&mut self) {}
+    fn stop_rate_limit_poller(&mut self) {
+        if let Some(handle) = self.rate_limit_poller.take() {
+            handle.abort();
+        }
+    }
 
     fn stop_git_status_poller(&mut self) {
         if let Some(handle) = self.git_status_poller.take() {
@@ -7627,6 +7636,7 @@ impl ChatWidget {
         self.rate_limit_warnings = RateLimitWarningState::default();
         self.rate_limit_switch_prompt = RateLimitSwitchPromptState::default();
         self.git_status = None;
+        self.refresh_status_line();
         self.request_redraw();
     }
 
@@ -7640,7 +7650,31 @@ impl ChatWidget {
 
     #[cfg_attr(not(test), allow(dead_code))]
     fn prefetch_rate_limits(&mut self) {
-        self.stop_rate_limit_poller();
+        if self.should_prefetch_rate_limits() {
+            self.start_rate_limit_poller();
+        } else {
+            self.stop_rate_limit_poller();
+        }
+    }
+
+    fn start_rate_limit_poller(&mut self) {
+        if self.rate_limit_poller.is_some() {
+            return;
+        }
+
+        let app_event_tx = self.app_event_tx.clone();
+
+        let handle = tokio::spawn(async move {
+            let mut interval =
+                tokio::time::interval(Duration::from_secs(RATE_LIMIT_REFRESH_INTERVAL_SECS));
+
+            loop {
+                interval.tick().await;
+                app_event_tx.send(AppEvent::RefreshRateLimits);
+            }
+        });
+
+        self.rate_limit_poller = Some(handle);
     }
 
     fn start_git_status_poller(&mut self) {
@@ -7651,7 +7685,7 @@ impl ChatWidget {
 
         let handle = tokio::spawn(async move {
             let mut interval =
-                tokio::time::interval(Duration::from_secs(RATE_LIMIT_POLL_INTERVAL_SECS));
+                tokio::time::interval(Duration::from_secs(GIT_STATUS_POLL_INTERVAL_SECS));
 
             loop {
                 interval.tick().await;
@@ -9592,6 +9626,10 @@ impl ChatWidget {
         self.has_chatgpt_account = has_chatgpt_account;
         self.bottom_pane
             .set_connectors_enabled(self.connectors_enabled());
+        self.prefetch_rate_limits();
+        if !self.should_prefetch_rate_limits() {
+            self.on_rate_limit_snapshot(None);
+        }
     }
 
     pub(crate) fn should_show_fast_status(

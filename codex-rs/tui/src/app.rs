@@ -4382,6 +4382,22 @@ impl App {
                 self.handle_auth_file_changed(tui, app_server, attempt)
                     .await;
             }
+            AppEvent::RefreshRateLimits => {
+                if self.config.model_provider.requires_openai_auth
+                    && self.chat_widget.has_chatgpt_account()
+                {
+                    match app_server.get_account_rate_limit_snapshots().await {
+                        Ok(snapshots) => {
+                            for snapshot in snapshots {
+                                self.chat_widget.on_rate_limit_snapshot(Some(snapshot));
+                            }
+                        }
+                        Err(err) => {
+                            tracing::debug!(error = %err, "background rate-limit refresh failed");
+                        }
+                    }
+                }
+            }
             AppEvent::RateLimitSnapshotFetched(snapshot) => {
                 self.chat_widget.on_rate_limit_snapshot(Some(snapshot));
             }

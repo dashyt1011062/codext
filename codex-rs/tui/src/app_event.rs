@@ -146,6 +146,9 @@ pub(crate) enum AppEvent {
         attempt: u8,
     },
 
+    /// Request a background refresh of ChatGPT rate limits.
+    RefreshRateLimits,
+
     /// Result of refreshing rate limits
     #[allow(dead_code)]
     RateLimitSnapshotFetched(RateLimitSnapshot),

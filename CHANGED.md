@@ -16,6 +16,7 @@ This file captures the full set of changes currently in the working tree.
 
 - Added a status header above the composer in the app-server-backed `codex-rs/tui` surface. It shows model + reasoning effort, current directory, git branch/ahead/behind/changes, and rate-limit remaining/reset time.
 - Git status is collected in the background (15s interval, 2s timeout) and rendered when available.
+- ChatGPT `5h` / weekly usage-limit snapshots in the TUI now refresh in the background every 15 seconds, so the header and any `/statusline` limit items keep moving while the UI is otherwise idle.
 - `rust-v0.118.0` removed the old `tui_app_server` crate upstream, so the reapply keeps only the surviving TUI path aligned with the status-header skill.
 
 ## TUI auth.json watcher

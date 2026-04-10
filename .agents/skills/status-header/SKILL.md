@@ -99,3 +99,5 @@ exact code.
   `tui_app_server` both show the header, each side needs its own refresh path and redraw trigger.
 - For `tui_app_server`, do not assume the rate-limit source is local `/usage` polling; event-driven
   or bootstrap-fed data is acceptable if it keeps the header equivalently fresh.
+- In this fork's app-server-backed `codex-rs/tui`, keep ChatGPT rate-limit snapshots fresh with a
+  15-second background refresh cadence and redraw the UI after each successful snapshot update.

@@ -1,0 +1,44 @@
+name: linux-arm64-build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-linux-arm64:
+    name: Build codex on Linux arm64
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: codex-rs
+
+      - name: Build codex
+        run: |
+          cargo build \
+            --locked \
+            --release \
+            --manifest-path codex-rs/Cargo.toml \
+            -p codex-cli \
+            --bin codex
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-linux-arm64
+          path: codex-rs/target/release/codex
+          if-no-files-found: error
+          retention-days: 7

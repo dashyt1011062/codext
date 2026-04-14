@@ -15,11 +15,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Linux build dependencies
-        run: |
-          sudo apt-get update -y
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pkg-config libcap-dev libubsan1
-
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -30,17 +25,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: codex-rs
-
-      - name: Build linux sandbox
-        env:
-          RUST_BACKTRACE: 1
-        run: |
-          cargo build \
-            -vv \
-            --locked \
-            --release \
-            --manifest-path codex-rs/linux-sandbox/Cargo.toml \
-            --bin codex-linux-sandbox
 
       - name: Build codex cli
         env:

@@ -31,9 +31,23 @@ jobs:
         with:
           workspaces: codex-rs
 
-      - name: Build codex
+      - name: Build linux sandbox
+        env:
+          RUST_BACKTRACE: 1
         run: |
           cargo build \
+            -vv \
+            --locked \
+            --release \
+            --manifest-path codex-rs/linux-sandbox/Cargo.toml \
+            --bin codex-linux-sandbox
+
+      - name: Build codex cli
+        env:
+          RUST_BACKTRACE: 1
+        run: |
+          cargo build \
+            -vv \
             --locked \
             --release \
             --manifest-path codex-rs/Cargo.toml \
